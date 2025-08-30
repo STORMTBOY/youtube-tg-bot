@@ -8,8 +8,8 @@ services:
     autoDeploy: true
     envVars:
       - key: BOT_TOKEN
-        sync: false
+        sync: 8304420573:AAHsEKGcCzybTWWttkKDYZFiFntEBiPGeTA
       - key: WEBHOOK_SECRET
-        sync: false
+        sync: Mani1384
       - key: WEBHOOK_PATH
         value: /webhook
