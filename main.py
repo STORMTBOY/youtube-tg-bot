@@ -62,20 +62,21 @@ async def handle_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tmpdir = Path("/tmp")
     tmpdir.mkdir(exist_ok=True)
 
-  COOKIE_FILE = os.environ.get("YOUTUBE_COOKIES")
+    COOKIE_FILE = os.environ.get("YOUTUBE_COOKIES")
 
-ydl_opts = {
-    "format": "bestvideo+bestaudio/best",
-    "outtmpl": str(tmpdir / "%(id)s.%(ext)s"),
-    "merge_output_format": "mp4",
-    "noplaylist": True,
-    "quiet": True,
-    "no_warnings": True,
-}
+    ydl_opts = {
+        "format": "bestvideo+bestaudio/best",
+        "outtmpl": str(tmpdir / "%(id)s.%(ext)s"),
+        "merge_output_format": "mp4",
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+    }
 
-# اگر کوکی ست شده بود → اضافه کن
-if COOKIE_FILE:
-    ydl_opts["cookiefile"] = COOKIE_FILE
+    # اگر کوکی ست شده بود → اضافه کن
+    if COOKIE_FILE:
+        ydl_opts["cookiefile"] = COOKIE_FILE
+
 
     file_path = None
     try:
@@ -160,6 +161,7 @@ async def on_startup():
 async def on_shutdown():
     await application.stop()
     await application.shutdown()
+
 
 
 
