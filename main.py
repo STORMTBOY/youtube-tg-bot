@@ -60,13 +60,14 @@ async def handle_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tmpdir.mkdir(exist_ok=True)
 
     ydl_opts = {
-        "format": format_id,
-        "outtmpl": str(tmpdir / "%(id)s.%(ext)s"),
-        "merge_output_format": "mp4",
-        "noplaylist": True,
-        "quiet": True,
-        "no_warnings": True,
-    }
+    "format": "bestvideo+bestaudio/best",
+    "outtmpl": str(tmpdir / "%(id)s.%(ext)s"),
+    "merge_output_format": "mp4",
+    "noplaylist": True,
+    "quiet": True,
+    "no_warnings": True,
+    "cookiefile": "/tmp/cookies.txt",  # ← مسیر فایل cookies.txt
+}
 
     file_path = None
     try:
@@ -151,3 +152,4 @@ async def on_startup():
 async def on_shutdown():
     await application.stop()
     await application.shutdown()
+
