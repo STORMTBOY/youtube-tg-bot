@@ -8,21 +8,26 @@ import yt_dlp
 import math
 import subprocess
 
+# 🔑 ENV VARS
 TOKEN = os.environ["BOT_TOKEN"]
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "change-me")
 BASE_URL = os.environ.get("RENDER_EXTERNAL_URL")
 WEBHOOK_PATH = os.environ.get("WEBHOOK_PATH", "/webhook")
-COOKIE_FILE = os.environ.get("YOUTUBE_COOKIES")  # خواندن مسیر از Env Var
-if COOKIE_FILE:
-    ydl_opts["cookiefile"] = COOKIE_FILE
-    
+
+# 📂 مسیر کوکی‌ها
+COOKIE_FILE = os.environ.get("YOUTUBE_COOKIES", "cookies.txt")
+
 app = FastAPI()
 application = Application.builder().token(TOKEN).build()
 
 YOUTUBE_RE = re.compile(r'(https?://(?:www\.)?(?:youtube\.com|youtu\.be)/\S+)', re.I)
 
+
+# ───── دستورات بات ─────
+
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("سلام! لینک یوتیوب بده تا کیفیت‌ها و حجم‌ها رو برات نشون بدم 🎬")
+
 
 async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (update.message.text or "").strip()
@@ -30,26 +35,36 @@ async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not m:
         return
     url = m.group(1)
+
     await update.message.reply_text("درحال بررسی کیفیت‌ها و حجم‌ها... ⏳")
 
-    ydl_opts = {"quiet": True, "no_warnings": True}
+    ydl_opts = {
+        "quiet": True,
+        "no_warnings": True,
+    }
+    if COOKIE_FILE and os.path.exists(COOKIE_FILE):
+        ydl_opts["cookiefile"] = COOKIE_FILE
+
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
         formats = info.get("formats", [])
         msg_lines = []
         for f in formats:
             if f.get("vcodec") != "none":
-                size_mb = (f.get("filesize") or 0) / (1024*1024)
-                msg_lines.append(f"{f['format_id']}: {f.get('height', '?')}p, {f.get('ext')}, ~{round(size_mb,1)} MB")
+                size_mb = (f.get("filesize") or 0) / (1024 * 1024)
+                msg_lines.append(
+                    f"{f['format_id']}: {f.get('height','?')}p, {f.get('ext')}, ~{round(size_mb,1)} MB"
+                )
+
         if not msg_lines:
             await update.message.reply_text("❌ کیفیتی پیدا نشد.")
             return
+
         await update.message.reply_text("\n".join(msg_lines)[:4000])
 
     await update.message.reply_text("لطفا format_id دلخواهت رو بفرست تا دانلود کنم:")
-
-    # ذخیره url برای مرحله بعد
     context.user_data["yt_url"] = url
+
 
 async def handle_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
     format_id = update.message.text.strip()
@@ -59,24 +74,20 @@ async def handle_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await update.message.reply_text(f"دانلود با format_id={format_id} شروع شد... ⏳")
+
     tmpdir = Path("/tmp")
     tmpdir.mkdir(exist_ok=True)
 
-    COOKIE_FILE = os.environ.get("YOUTUBE_COOKIES")
-
     ydl_opts = {
-        "format": "bestvideo+bestaudio/best",
+        "format": format_id,
         "outtmpl": str(tmpdir / "%(id)s.%(ext)s"),
         "merge_output_format": "mp4",
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
     }
-
-    # اگر کوکی ست شده بود → اضافه کن
-    if COOKIE_FILE:
+    if COOKIE_FILE and os.path.exists(COOKIE_FILE):
         ydl_opts["cookiefile"] = COOKIE_FILE
-
 
     file_path = None
     try:
@@ -86,31 +97,34 @@ async def handle_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not file_path.endswith(".mp4"):
                 file_path = os.path.splitext(file_path)[0] + ".mp4"
 
-        # بررسی اندازه و تقسیم خودکار
-        max_size = 50*1024*1024  # 50MB
+        # ─ تقسیم فایل در صورت بزرگ بودن
+        max_size = 50 * 1024 * 1024  # 50MB
         file_size = os.path.getsize(file_path)
+
         if file_size <= max_size:
             async with aiofiles.open(file_path, "rb") as f:
-                await update.message.reply_video(video=InputFile(file_path),
-                                                caption=info.get("title","")[:1024],
-                                                supports_streaming=True)
+                await update.message.reply_video(
+                    video=InputFile(file_path),
+                    caption=info.get("title", "")[:1024],
+                    supports_streaming=True,
+                )
         else:
-            # تقسیم فایل با ffmpeg
             num_parts = math.ceil(file_size / max_size)
             part_pattern = str(tmpdir / "part%03d.mp4")
             subprocess.run([
-                "ffmpeg","-i",file_path,"-c","copy","-map","0",
-                "-f","segment","-segment_size", str(max_size),
-                part_pattern
+                "ffmpeg", "-i", file_path, "-c", "copy", "-map", "0",
+                "-f", "segment", "-segment_size", str(max_size), part_pattern
             ])
-            # ارسال هر قسمت
+
             for i in range(num_parts):
                 part_file = tmpdir / f"part{i:03d}.mp4"
                 if part_file.exists():
-                    async with aiofiles.open(part_file,"rb") as f:
-                        await update.message.reply_video(video=InputFile(part_file),
-                                                        caption=f"{info.get('title','')} (Part {i+1})",
-                                                        supports_streaming=True)
+                    async with aiofiles.open(part_file, "rb") as f:
+                        await update.message.reply_video(
+                            video=InputFile(part_file),
+                            caption=f"{info.get('title','')} (Part {i+1})",
+                            supports_streaming=True,
+                        )
                     os.remove(part_file)
 
     except Exception as e:
@@ -122,18 +136,22 @@ async def handle_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except:
             pass
 
+
+# ───── ثبت هندلرها ─────
 application.add_handler(CommandHandler("start", start_cmd))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_msg))
-application.add_handler(MessageHandler(filters.Regex(r'^\w+$'), handle_format))  # format_id
+application.add_handler(MessageHandler(filters.Regex(r'^\w+$'), handle_format))
 
-# سلامت
+
+# ───── FastAPI Routes ─────
 @app.get("/")
 async def health():
     return {"status": "ok"}
 
-# وبهوک
+
 class TelegramUpdate(BaseModel):
     update_id: int | None = None
+
 
 @app.post(WEBHOOK_PATH)
 async def telegram_webhook(request: Request):
@@ -143,6 +161,7 @@ async def telegram_webhook(request: Request):
     update = Update.de_json(data, application.bot)
     await application.process_update(update)
     return {"ok": True}
+
 
 @app.on_event("startup")
 async def on_startup():
@@ -154,15 +173,11 @@ async def on_startup():
         url=BASE_URL + WEBHOOK_PATH,
         secret_token=WEBHOOK_SECRET,
         drop_pending_updates=True,
-        allowed_updates=["message"]
+        allowed_updates=["message"],
     )
+
 
 @app.on_event("shutdown")
 async def on_shutdown():
     await application.stop()
     await application.shutdown()
-
-
-
-
-
