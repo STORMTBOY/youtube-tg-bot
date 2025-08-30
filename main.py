@@ -66,7 +66,7 @@ async def handle_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
     "noplaylist": True,
     "quiet": True,
     "no_warnings": True,
-    "cookiefile": "/tmp/cookies.txt",  # ← مسیر فایل cookies.txt
+    "cookiefile": "cookies.txt",  # ← مسیر فایل cookies.txt
 }
 
     file_path = None
@@ -152,4 +152,5 @@ async def on_startup():
 async def on_shutdown():
     await application.stop()
     await application.shutdown()
+
 
