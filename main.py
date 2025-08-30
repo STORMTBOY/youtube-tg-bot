@@ -12,7 +12,10 @@ TOKEN = os.environ["BOT_TOKEN"]
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "change-me")
 BASE_URL = os.environ.get("RENDER_EXTERNAL_URL")
 WEBHOOK_PATH = os.environ.get("WEBHOOK_PATH", "/webhook")
-
+COOKIE_FILE = os.environ.get("YOUTUBE_COOKIES")  # خواندن مسیر از Env Var
+if COOKIE_FILE:
+    ydl_opts["cookiefile"] = COOKIE_FILE
+    
 app = FastAPI()
 application = Application.builder().token(TOKEN).build()
 
@@ -152,5 +155,6 @@ async def on_startup():
 async def on_shutdown():
     await application.stop()
     await application.shutdown()
+
 
 
