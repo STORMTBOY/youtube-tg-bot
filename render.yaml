@@ -13,3 +13,5 @@ services:
         sync: Mani1384
       - key: WEBHOOK_PATH
         value: /webhook
+      - key: YOUTUBE_COOKIES
+        value: /opt/render/project/src/cookies.txt
