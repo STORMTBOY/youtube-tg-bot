@@ -8,7 +8,7 @@ import yt_dlp
 import math
 import subprocess
 
-TOKEN = os.environ["8304420573:AAHsEKGcCzybTWWttkKDYZFiFntEBiPGeTA"]
+TOKEN = os.environ["BOT_TOKEN"]
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "change-me")
 BASE_URL = os.environ.get("RENDER_EXTERNAL_URL")
 WEBHOOK_PATH = os.environ.get("WEBHOOK_PATH", "/webhook")
@@ -151,4 +151,5 @@ async def on_startup():
 async def on_shutdown():
     await application.stop()
     await application.shutdown()
+
 
