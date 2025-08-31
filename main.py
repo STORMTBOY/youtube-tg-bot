@@ -45,47 +45,55 @@ async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if COOKIE_FILE and os.path.exists(COOKIE_FILE):
         ydl_opts["cookiefile"] = COOKIE_FILE
 
+    formats_map = {}
+    msg_lines = []
+
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
         formats = info.get("formats", [])
-        msg_lines = []
-        added_formats = set()
 
+        i = 1
+        added = set()
         for f in formats:
             if f.get("vcodec") != "none":  # فقط ویدئو
                 if f.get("acodec") != "none":
-                    # ویدئو با صدا
-                    size_mb = (f.get("filesize") or 0) / (1024 * 1024)
-                    key = f['format_id']
+                    fmt = f['format_id']
                 else:
-                    # ویدئو بدون صدا → ترکیب با bestaudio
-                    size_mb = (f.get("filesize") or 0) / (1024 * 1024)
-                    key = f"{f['format_id']}+bestaudio"
+                    fmt = f"{f['format_id']}+bestaudio"
 
-                if key not in added_formats:
-                    msg_lines.append(
-                        f"{key}: {f.get('height','?')}p, {f.get('ext')}, ~{round(size_mb,1)} MB"
-                    )
-                    added_formats.add(key)
+                if fmt in added:
+                    continue
+                added.add(fmt)
 
-        if not msg_lines:
-            await update.message.reply_text("❌ کیفیت قابل دانلودی پیدا نشد.")
-            return
+                size_mb = (f.get("filesize") or 0) / (1024 * 1024)
+                msg_lines.append(
+                    f"{i}: {f.get('height','?')}p, {f.get('ext')}, ~{round(size_mb,1)} MB"
+                )
+                formats_map[str(i)] = fmt
+                i += 1
 
-        await update.message.reply_text("\n".join(msg_lines)[:4000])
+    if not msg_lines:
+        await update.message.reply_text("❌ کیفیت قابل دانلودی پیدا نشد.")
+        return
 
-    await update.message.reply_text("لطفا format_id دلخواهت رو بفرست تا دانلود کنم:")
+    await update.message.reply_text("\n".join(msg_lines)[:4000])
+    await update.message.reply_text("یک عدد (شماره کیفیت) انتخاب کن:")
+
     context.user_data["yt_url"] = url
+    context.user_data["formats_map"] = formats_map
 
 
 async def handle_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    format_id = update.message.text.strip()
+    choice = update.message.text.strip()
     url = context.user_data.get("yt_url")
-    if not url:
-        await update.message.reply_text("❌ ابتدا لینک یوتیوب بده.")
+    formats_map = context.user_data.get("formats_map", {})
+
+    if not url or choice not in formats_map:
+        await update.message.reply_text("❌ ابتدا لینک بده و یکی از شماره‌های لیست رو انتخاب کن.")
         return
 
-    await update.message.reply_text(f"دانلود با format_id={format_id} شروع شد... ⏳")
+    format_id = formats_map[choice]
+    await update.message.reply_text(f"دانلود کیفیت انتخابی ({choice}) شروع شد... ⏳")
 
     tmpdir = Path("/tmp")
     tmpdir.mkdir(exist_ok=True)
@@ -150,7 +158,7 @@ async def handle_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ───── ثبت هندلرها ─────
 application.add_handler(CommandHandler("start", start_cmd))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_msg))
-application.add_handler(MessageHandler(filters.Regex(r'^[\w\+]+$'), handle_format))
+application.add_handler(MessageHandler(filters.Regex(r'^\d+$'), handle_format))
 
 
 # ───── FastAPI Routes ─────
