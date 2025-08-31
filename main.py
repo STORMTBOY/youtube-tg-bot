@@ -1,12 +1,10 @@
-import os, re, asyncio, aiofiles, shutil
+import os, re, asyncio, aiofiles
 from pathlib import Path
 from fastapi import FastAPI, Request, HTTPException
 from pydantic import BaseModel
 from telegram import Update, InputFile
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 import yt_dlp
-import math
-import subprocess
 
 # 🔑 ENV VARS
 TOKEN = os.environ["BOT_TOKEN"]
@@ -26,6 +24,7 @@ tmpdir.mkdir(exist_ok=True)
 
 # ───── Conversation States ─────
 CHOOSING_FORMAT = 1
+MAX_SIZE_MB = 50
 
 # ───── دستورات بات ─────
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -73,6 +72,9 @@ async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 vsize = f.get("filesize") or 0
                 asize = best_audio.get("filesize") if best_audio else 0
                 total_size = (vsize + (asize or 0)) / (1024*1024)
+
+            if total_size > MAX_SIZE_MB:  # فقط فرمت‌های ≤50MB
+                continue
             if fmt in added:
                 continue
             added.add(fmt)
@@ -81,7 +83,7 @@ async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
             i += 1
 
     if not msg_lines:
-        await update.message.reply_text("❌ کیفیت قابل دانلودی پیدا نشد.")
+        await update.message.reply_text(f"❌ هیچ کیفیتی ≤ {MAX_SIZE_MB}MB پیدا نشد.")
         return CHOOSING_FORMAT
 
     await update.message.reply_text("\n".join(msg_lines)[:4000])
@@ -120,31 +122,14 @@ async def handle_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
             info = ydl.extract_info(url, download=True)
             file_path = ydl.prepare_filename(info)
             if not file_path.endswith(".mp4"):
-                file_path = os.path.splitext(file_path)[0] + ".mp4"
+                file_path = str(Path(file_path).with_suffix(".mp4"))
 
         await update.message.reply_text("دانلود تمام شد، در حال آپلود... ⏳")
 
-        max_size = 50 * 1024 * 1024
-        file_size = os.path.getsize(file_path)
+        await update.message.reply_video(video=InputFile(file_path),
+                                        caption=info.get("title", "")[:1024],
+                                        supports_streaming=True)
 
-        if file_size <= max_size:
-            await update.message.reply_video(video=InputFile(file_path),
-                                            caption=info.get("title", "")[:1024],
-                                            supports_streaming=True)
-        else:
-            num_parts = math.ceil(file_size / max_size)
-            part_pattern = str(tmpdir / "part%03d.mp4")
-            subprocess.run([
-                "ffmpeg", "-i", file_path, "-c", "copy", "-map", "0",
-                "-f", "segment", "-segment_time", "60", part_pattern
-            ])
-            for i in range(num_parts):
-                part_file = tmpdir / f"part{i:03d}.mp4"
-                if part_file.exists():
-                    await update.message.reply_video(video=InputFile(part_file),
-                                                    caption=f"{info.get('title','')} (Part {i+1})",
-                                                    supports_streaming=True)
-                    os.remove(part_file)
     except Exception as e:
         await update.message.reply_text(f"❌ خطا در دانلود/ارسال: {e}")
     finally:
@@ -165,7 +150,6 @@ conv_handler = ConversationHandler(
     },
     fallbacks=[]
 )
-
 application.add_handler(conv_handler)
 
 # ───── FastAPI ─────
