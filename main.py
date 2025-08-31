@@ -3,7 +3,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request, HTTPException
 from pydantic import BaseModel
 from telegram import Update, InputFile
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 import yt_dlp
 import math
 import subprocess
@@ -15,8 +15,7 @@ BASE_URL = os.environ.get("RENDER_EXTERNAL_URL")
 WEBHOOK_PATH = os.environ.get("WEBHOOK_PATH", "/webhook")
 
 COOKIE_FILE = os.environ.get("YOUTUBE_COOKIES", "cookies.txt")
-
-POPULAR_HEIGHTS = [1080, 720, 480, 360, 240]  # رزولوشن‌های محبوب
+POPULAR_HEIGHTS = [1080, 720, 480, 360, 240]
 
 app = FastAPI()
 application = Application.builder().token(TOKEN).build()
@@ -25,17 +24,21 @@ YOUTUBE_RE = re.compile(r'(https?://(?:www\.)?(?:youtube\.com|youtu\.be)/\S+)', 
 tmpdir = Path("/tmp")
 tmpdir.mkdir(exist_ok=True)
 
+# ───── Conversation States ─────
+CHOOSING_FORMAT = 1
+
 # ───── دستورات بات ─────
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("سلام! لینک یوتیوب بده تا کیفیت‌های محبوب و سالم رو برات نشون بدم 🎬")
+    return CHOOSING_FORMAT
 
 async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (update.message.text or "").strip()
     m = YOUTUBE_RE.search(text)
     if not m:
-        return
+        await update.message.reply_text("❌ لینک یوتیوب معتبر نیست.")
+        return CHOOSING_FORMAT
     url = m.group(1)
-
     await update.message.reply_text("درحال بررسی کیفیت‌ها و حجم‌های تقریبی... ⏳")
 
     ydl_opts = {"quiet": True, "no_warnings": True}
@@ -79,24 +82,23 @@ async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not msg_lines:
         await update.message.reply_text("❌ کیفیت قابل دانلودی پیدا نشد.")
-        return
+        return CHOOSING_FORMAT
 
     await update.message.reply_text("\n".join(msg_lines)[:4000])
     await update.message.reply_text("یک عدد (شماره کیفیت) انتخاب کن:")
 
     context.user_data["yt_url"] = url
     context.user_data["formats_map"] = formats_map
+    return CHOOSING_FORMAT
 
 async def handle_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
     choice = update.message.text.strip()
     url = context.user_data.get("yt_url")
     formats_map = context.user_data.get("formats_map", {})
 
-    print(f"[DEBUG] Received choice={choice}, formats_map keys={list(formats_map.keys())}")
-
     if not url or choice not in formats_map:
-        await update.message.reply_text("❌ ابتدا لینک بده و یکی از شماره‌های لیست رو انتخاب کن.")
-        return
+        await update.message.reply_text("❌ لطفاً یک شماره معتبر از لیست فرمت‌ها انتخاب کن.")
+        return CHOOSING_FORMAT
 
     format_id = formats_map[choice]
     await update.message.reply_text(f"دانلود کیفیت انتخابی ({choice}) شروع شد... ⏳")
@@ -152,10 +154,19 @@ async def handle_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except:
             pass
 
-# ───── هندلرها ─────
-application.add_handler(CommandHandler("start", start_cmd))
-application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_msg))
-application.add_handler(MessageHandler(filters.Regex(r'^\d+$'), handle_format))
+    return ConversationHandler.END
+
+# ───── هندلر Conversation ─────
+conv_handler = ConversationHandler(
+    entry_points=[CommandHandler("start", start_cmd)],
+    states={
+        CHOOSING_FORMAT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_msg),
+                          MessageHandler(filters.TEXT & ~filters.COMMAND, handle_format)]
+    },
+    fallbacks=[]
+)
+
+application.add_handler(conv_handler)
 
 # ───── FastAPI ─────
 @app.get("/")
