@@ -17,17 +17,15 @@ WEBHOOK_PATH = os.environ.get("WEBHOOK_PATH", "/webhook")
 # 📂 مسیر کوکی‌ها
 COOKIE_FILE = os.environ.get("YOUTUBE_COOKIES", "cookies.txt")
 
+POPULAR_HEIGHTS = [1080, 720, 480, 360, 240]  # رزولوشن‌های محبوب به ترتیب
+
 app = FastAPI()
 application = Application.builder().token(TOKEN).build()
-
 YOUTUBE_RE = re.compile(r'(https?://(?:www\.)?(?:youtube\.com|youtu\.be)/\S+)', re.I)
 
-
 # ───── دستورات بات ─────
-
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("سلام! لینک یوتیوب بده تا کیفیت‌های سالم رو برات نشون بدم 🎬")
-
+    await update.message.reply_text("سلام! لینک یوتیوب بده تا کیفیت‌های محبوب و سالم رو برات نشون بدم 🎬")
 
 async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (update.message.text or "").strip()
@@ -36,12 +34,9 @@ async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     url = m.group(1)
 
-    await update.message.reply_text("درحال بررسی کیفیت‌ها و حجم‌ها... ⏳")
+    await update.message.reply_text("درحال بررسی کیفیت‌های محبوب و حجم‌ها... ⏳")
 
-    ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
-    }
+    ydl_opts = {"quiet": True, "no_warnings": True}
     if COOKIE_FILE and os.path.exists(COOKIE_FILE):
         ydl_opts["cookiefile"] = COOKIE_FILE
 
@@ -54,23 +49,22 @@ async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         i = 1
         added = set()
-        for f in formats:
-            if f.get("vcodec") != "none":  # فقط ویدئو
-                if f.get("acodec") != "none":
-                    fmt = f['format_id']
-                else:
-                    fmt = f"{f['format_id']}+bestaudio"
-
-                if fmt in added:
-                    continue
-                added.add(fmt)
-
-                size_mb = (f.get("filesize") or 0) / (1024 * 1024)
-                msg_lines.append(
-                    f"{i}: {f.get('height','?')}p, {f.get('ext')}, ~{round(size_mb,1)} MB"
-                )
-                formats_map[str(i)] = fmt
-                i += 1
+        for h in POPULAR_HEIGHTS:
+            candidates = [f for f in formats if f.get("vcodec") != "none" and f.get("height") == h]
+            if not candidates:
+                continue
+            f = max(candidates, key=lambda x: x.get("tbr", 0))
+            if f.get("acodec") != "none":
+                fmt = f['format_id']
+            else:
+                fmt = f"{f['format_id']}+bestaudio"
+            if fmt in added:
+                continue
+            added.add(fmt)
+            size_mb = (f.get("filesize") or 0) / (1024*1024)
+            msg_lines.append(f"{i}: {f.get('height','?')}p, {f.get('ext')}, ~{round(size_mb,1)} MB")
+            formats_map[str(i)] = fmt
+            i += 1
 
     if not msg_lines:
         await update.message.reply_text("❌ کیفیت قابل دانلودی پیدا نشد.")
@@ -82,11 +76,13 @@ async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["yt_url"] = url
     context.user_data["formats_map"] = formats_map
 
-
 async def handle_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
     choice = update.message.text.strip()
     url = context.user_data.get("yt_url")
     formats_map = context.user_data.get("formats_map", {})
+
+    # لاگ برای debug
+    print(f"[DEBUG] Received choice={choice}, formats_map keys={list(formats_map.keys())}")
 
     if not url or choice not in formats_map:
         await update.message.reply_text("❌ ابتدا لینک بده و یکی از شماره‌های لیست رو انتخاب کن.")
@@ -117,7 +113,7 @@ async def handle_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not file_path.endswith(".mp4"):
                 file_path = os.path.splitext(file_path)[0] + ".mp4"
 
-        # ─ تقسیم فایل در صورت بزرگ بودن
+        # تقسیم فایل در صورت بزرگ بودن
         max_size = 50 * 1024 * 1024  # 50MB
         file_size = os.path.getsize(file_path)
 
@@ -154,22 +150,18 @@ async def handle_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except:
             pass
 
-
 # ───── ثبت هندلرها ─────
 application.add_handler(CommandHandler("start", start_cmd))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_msg))
 application.add_handler(MessageHandler(filters.Regex(r'^\d+$'), handle_format))
-
 
 # ───── FastAPI Routes ─────
 @app.get("/")
 async def health():
     return {"status": "ok"}
 
-
 class TelegramUpdate(BaseModel):
     update_id: int | None = None
-
 
 @app.post(WEBHOOK_PATH)
 async def telegram_webhook(request: Request):
@@ -179,7 +171,6 @@ async def telegram_webhook(request: Request):
     update = Update.de_json(data, application.bot)
     await application.process_update(update)
     return {"ok": True}
-
 
 @app.on_event("startup")
 async def on_startup():
@@ -193,7 +184,6 @@ async def on_startup():
         drop_pending_updates=True,
         allowed_updates=["message"],
     )
-
 
 @app.on_event("shutdown")
 async def on_shutdown():
