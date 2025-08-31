@@ -14,10 +14,9 @@ WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "change-me")
 BASE_URL = os.environ.get("RENDER_EXTERNAL_URL")
 WEBHOOK_PATH = os.environ.get("WEBHOOK_PATH", "/webhook")
 
-# 📂 مسیر کوکی‌ها
 COOKIE_FILE = os.environ.get("YOUTUBE_COOKIES", "cookies.txt")
 
-POPULAR_HEIGHTS = [1080, 720, 480, 360, 240]  # رزولوشن‌های محبوب به ترتیب
+POPULAR_HEIGHTS = [1080, 720, 480, 360, 240]  # رزولوشن‌های محبوب
 
 app = FastAPI()
 application = Application.builder().token(TOKEN).build()
@@ -34,7 +33,7 @@ async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     url = m.group(1)
 
-    await update.message.reply_text("درحال بررسی کیفیت‌های محبوب و حجم‌ها... ⏳")
+    await update.message.reply_text("درحال بررسی کیفیت‌ها و حجم‌های تقریبی... ⏳")
 
     ydl_opts = {"quiet": True, "no_warnings": True}
     if COOKIE_FILE and os.path.exists(COOKIE_FILE):
@@ -53,16 +52,26 @@ async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
             candidates = [f for f in formats if f.get("vcodec") != "none" and f.get("height") == h]
             if not candidates:
                 continue
+            # بهترین فرمت video
             f = max(candidates, key=lambda x: x.get("tbr", 0))
+            # بررسی وجود صدا
+            best_audio = None
+            for fa in formats:
+                if fa.get("acodec") != "none" and fa.get("vcodec") == "none":
+                    best_audio = fa
+                    break
             if f.get("acodec") != "none":
                 fmt = f['format_id']
+                total_size = (f.get("filesize") or 0)/ (1024*1024)
             else:
-                fmt = f"{f['format_id']}+bestaudio"
+                fmt = f"{f['format_id']}+{best_audio['format_id'] if best_audio else 'bestaudio'}"
+                vsize = f.get("filesize") or 0
+                asize = best_audio.get("filesize") if best_audio else 0
+                total_size = (vsize + (asize or 0)) / (1024*1024)
             if fmt in added:
                 continue
             added.add(fmt)
-            size_mb = (f.get("filesize") or 0) / (1024*1024)
-            msg_lines.append(f"{i}: {f.get('height','?')}p, {f.get('ext')}, ~{round(size_mb,1)} MB")
+            msg_lines.append(f"{i}: {f.get('height','?')}p, ~{round(total_size,1)} MB")
             formats_map[str(i)] = fmt
             i += 1
 
@@ -81,7 +90,6 @@ async def handle_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = context.user_data.get("yt_url")
     formats_map = context.user_data.get("formats_map", {})
 
-    # لاگ برای debug
     print(f"[DEBUG] Received choice={choice}, formats_map keys={list(formats_map.keys())}")
 
     if not url or choice not in formats_map:
@@ -113,16 +121,15 @@ async def handle_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not file_path.endswith(".mp4"):
                 file_path = os.path.splitext(file_path)[0] + ".mp4"
 
-        # تقسیم فایل در صورت بزرگ بودن
-        max_size = 50 * 1024 * 1024  # 50MB
+        await update.message.reply_text("دانلود تمام شد، در حال آپلود... ⏳")
+
+        max_size = 50 * 1024 * 1024
         file_size = os.path.getsize(file_path)
 
         if file_size <= max_size:
-            await update.message.reply_video(
-                video=InputFile(file_path),
-                caption=info.get("title", "")[:1024],
-                supports_streaming=True,
-            )
+            await update.message.reply_video(video=InputFile(file_path),
+                                            caption=info.get("title", "")[:1024],
+                                            supports_streaming=True)
         else:
             num_parts = math.ceil(file_size / max_size)
             part_pattern = str(tmpdir / "part%03d.mp4")
@@ -130,17 +137,13 @@ async def handle_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "ffmpeg", "-i", file_path, "-c", "copy", "-map", "0",
                 "-f", "segment", "-segment_time", "60", part_pattern
             ])
-
             for i in range(num_parts):
                 part_file = tmpdir / f"part{i:03d}.mp4"
                 if part_file.exists():
-                    await update.message.reply_video(
-                        video=InputFile(part_file),
-                        caption=f"{info.get('title','')} (Part {i+1})",
-                        supports_streaming=True,
-                    )
+                    await update.message.reply_video(video=InputFile(part_file),
+                                                    caption=f"{info.get('title','')} (Part {i+1})",
+                                                    supports_streaming=True)
                     os.remove(part_file)
-
     except Exception as e:
         await update.message.reply_text(f"❌ خطا در دانلود/ارسال: {e}")
     finally:
@@ -150,12 +153,12 @@ async def handle_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except:
             pass
 
-# ───── ثبت هندلرها ─────
+# ───── هندلرها ─────
 application.add_handler(CommandHandler("start", start_cmd))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_msg))
 application.add_handler(MessageHandler(filters.Regex(r'^\d+$'), handle_format))
 
-# ───── FastAPI Routes ─────
+# ───── FastAPI ─────
 @app.get("/")
 async def health():
     return {"status": "ok"}
@@ -178,12 +181,10 @@ async def on_startup():
     await application.start()
     if not BASE_URL:
         raise RuntimeError("RENDER_EXTERNAL_URL not set")
-    await application.bot.set_webhook(
-        url=BASE_URL + WEBHOOK_PATH,
-        secret_token=WEBHOOK_SECRET,
-        drop_pending_updates=True,
-        allowed_updates=["message"],
-    )
+    await application.bot.set_webhook(url=BASE_URL + WEBHOOK_PATH,
+                                      secret_token=WEBHOOK_SECRET,
+                                      drop_pending_updates=True,
+                                      allowed_updates=["message"])
 
 @app.on_event("shutdown")
 async def on_shutdown():
