@@ -22,6 +22,9 @@ app = FastAPI()
 application = Application.builder().token(TOKEN).build()
 YOUTUBE_RE = re.compile(r'(https?://(?:www\.)?(?:youtube\.com|youtu\.be)/\S+)', re.I)
 
+tmpdir = Path("/tmp")
+tmpdir.mkdir(exist_ok=True)
+
 # ───── دستورات بات ─────
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("سلام! لینک یوتیوب بده تا کیفیت‌های محبوب و سالم رو برات نشون بدم 🎬")
@@ -52,9 +55,8 @@ async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
             candidates = [f for f in formats if f.get("vcodec") != "none" and f.get("height") == h]
             if not candidates:
                 continue
-            # بهترین فرمت video
             f = max(candidates, key=lambda x: x.get("tbr", 0))
-            # بررسی وجود صدا
+            # بهترین audio
             best_audio = None
             for fa in formats:
                 if fa.get("acodec") != "none" and fa.get("vcodec") == "none":
@@ -98,9 +100,6 @@ async def handle_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     format_id = formats_map[choice]
     await update.message.reply_text(f"دانلود کیفیت انتخابی ({choice}) شروع شد... ⏳")
-
-    tmpdir = Path("/tmp")
-    tmpdir.mkdir(exist_ok=True)
 
     ydl_opts = {
         "format": format_id,
