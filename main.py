@@ -26,7 +26,7 @@ YOUTUBE_RE = re.compile(r'(https?://(?:www\.)?(?:youtube\.com|youtu\.be)/\S+)', 
 # ───── دستورات بات ─────
 
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("سلام! لینک یوتیوب بده تا کیفیت‌ها و حجم‌ها رو برات نشون بدم 🎬")
+    await update.message.reply_text("سلام! لینک یوتیوب بده تا کیفیت‌های سالم رو برات نشون بدم 🎬")
 
 
 async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -49,15 +49,27 @@ async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
         info = ydl.extract_info(url, download=False)
         formats = info.get("formats", [])
         msg_lines = []
+        added_formats = set()
+
         for f in formats:
-            if f.get("vcodec") != "none":
-                size_mb = (f.get("filesize") or 0) / (1024 * 1024)
-                msg_lines.append(
-                    f"{f['format_id']}: {f.get('height','?')}p, {f.get('ext')}, ~{round(size_mb,1)} MB"
-                )
+            if f.get("vcodec") != "none":  # فقط ویدئو
+                if f.get("acodec") != "none":
+                    # ویدئو با صدا
+                    size_mb = (f.get("filesize") or 0) / (1024 * 1024)
+                    key = f['format_id']
+                else:
+                    # ویدئو بدون صدا → ترکیب با bestaudio
+                    size_mb = (f.get("filesize") or 0) / (1024 * 1024)
+                    key = f"{f['format_id']}+bestaudio"
+
+                if key not in added_formats:
+                    msg_lines.append(
+                        f"{key}: {f.get('height','?')}p, {f.get('ext')}, ~{round(size_mb,1)} MB"
+                    )
+                    added_formats.add(key)
 
         if not msg_lines:
-            await update.message.reply_text("❌ کیفیتی پیدا نشد.")
+            await update.message.reply_text("❌ کیفیت قابل دانلودی پیدا نشد.")
             return
 
         await update.message.reply_text("\n".join(msg_lines)[:4000])
@@ -69,10 +81,6 @@ async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
     format_id = update.message.text.strip()
     url = context.user_data.get("yt_url")
-
-    # 📌 لاگ برای تست
-    print(f"[LOG] User {update.effective_user.id} requested format_id={format_id} for {url}")
-
     if not url:
         await update.message.reply_text("❌ ابتدا لینک یوتیوب بده.")
         return
@@ -106,29 +114,27 @@ async def handle_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
         file_size = os.path.getsize(file_path)
 
         if file_size <= max_size:
-            async with aiofiles.open(file_path, "rb") as f:
-                await update.message.reply_video(
-                    video=InputFile(file_path),
-                    caption=info.get("title", "")[:1024],
-                    supports_streaming=True,
-                )
+            await update.message.reply_video(
+                video=InputFile(file_path),
+                caption=info.get("title", "")[:1024],
+                supports_streaming=True,
+            )
         else:
             num_parts = math.ceil(file_size / max_size)
             part_pattern = str(tmpdir / "part%03d.mp4")
             subprocess.run([
                 "ffmpeg", "-i", file_path, "-c", "copy", "-map", "0",
-                "-f", "segment", "-segment_size", str(max_size), part_pattern
+                "-f", "segment", "-segment_time", "60", part_pattern
             ])
 
             for i in range(num_parts):
                 part_file = tmpdir / f"part{i:03d}.mp4"
                 if part_file.exists():
-                    async with aiofiles.open(part_file, "rb") as f:
-                        await update.message.reply_video(
-                            video=InputFile(part_file),
-                            caption=f"{info.get('title','')} (Part {i+1})",
-                            supports_streaming=True,
-                        )
+                    await update.message.reply_video(
+                        video=InputFile(part_file),
+                        caption=f"{info.get('title','')} (Part {i+1})",
+                        supports_streaming=True,
+                    )
                     os.remove(part_file)
 
     except Exception as e:
@@ -143,8 +149,8 @@ async def handle_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ───── ثبت هندلرها ─────
 application.add_handler(CommandHandler("start", start_cmd))
-application.add_handler(MessageHandler(filters.Regex(r'^\d+$'), handle_format))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_msg))
+application.add_handler(MessageHandler(filters.Regex(r'^[\w\+]+$'), handle_format))
 
 
 # ───── FastAPI Routes ─────
