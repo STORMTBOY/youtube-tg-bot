@@ -69,6 +69,10 @@ async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
     format_id = update.message.text.strip()
     url = context.user_data.get("yt_url")
+
+    # 📌 لاگ برای تست
+    print(f"[LOG] User {update.effective_user.id} requested format_id={format_id} for {url}")
+
     if not url:
         await update.message.reply_text("❌ ابتدا لینک یوتیوب بده.")
         return
@@ -139,8 +143,8 @@ async def handle_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ───── ثبت هندلرها ─────
 application.add_handler(CommandHandler("start", start_cmd))
+application.add_handler(MessageHandler(filters.Regex(r'^\d+$'), handle_format))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_msg))
-application.add_handler(MessageHandler(filters.Regex(r'^\w+$'), handle_format))
 
 
 # ───── FastAPI Routes ─────
